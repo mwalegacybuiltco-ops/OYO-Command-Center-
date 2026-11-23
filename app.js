@@ -48,6 +48,54 @@ function nextWeekday(key) {
   return key;
 }
 
+const weeklyCap = () => Math.min(10,Math.max(5,Number(db().memberWeeklyCap)||5));
+
+function memberSlot(date) {
+  let candidate=nextWeekday(date);
+  while(true){
+    const week=weekStart(candidate);
+    const scheduled=db().events.filter(event=>event.memberCheckIn&&event.date>=week&&event.date<addDays(week,7));
+    if(scheduled.length<weeklyCap()){
+      const days=[];
+      for(let key=candidate;weekStart(key)===week&&asDate(key).getDay()!==6;key=addDays(key,1)){
+        days.push({key,count:scheduled.filter(event=>event.date===key).length});
+      }
+      if(days.length)return days.sort((a,b)=>a.count-b.count)[0].key;
+    }
+    candidate=addDays(week,7);
+  }
+}
+
+function validContactDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value||'')&&Number.isFinite(asDate(value).getTime())&&dateKey(asDate(value))===value&&value<=dateKey();
+}
+
+function lastContactFromNotes(notes, today=dateKey()) {
+  const months=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const patterns=/\b(\d{4}-\d{2}-\d{2})\b|\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/gi;
+  const dates=[];
+  for(const [,iso,month,day,year] of notes.matchAll(patterns)){
+    const suffix=month?'-'+String(months.indexOf(month.toLowerCase().slice(0,3))+1).padStart(2,'0')+'-'+day.padStart(2,'0'):'';
+    let key=iso||(year||today.slice(0,4))+suffix;
+    if(!iso&&!year&&key>today) key=String(Number(today.slice(0,4))-1)+suffix;
+    if(key<=today&&Number.isFinite(asDate(key).getTime())&&dateKey(asDate(key))===key) dates.push(key);
+  }
+  return dates.sort().at(-1)||'';
+}
+
+function queueMembers(people, cadence, start) {
+  const dateFor=person=>[person.lastContact||'',...(person.conversations||[]).map(log=>log.date)].filter(validContactDate).sort().at(-1);
+  const queue=people.filter(person=>!db().events.some(event=>event.memberCheckIn&&event.person===person.id&&!event.done))
+    .map(person=>({person,last:dateFor(person)}))
+    .sort((a,b)=>(a.last||'9999').localeCompare(b.last||'9999')||a.person.name.localeCompare(b.person.name));
+  for(const {person,last} of queue){
+    person.cadence=cadence;
+    const due=last?addDays(last,cadence):start;
+    memberPlan(person,memberSlot(due>start?due:start));
+  }
+  return queue.length;
+}
+
 function memberPlan(person, date) {
   const existing = db().events.find(event=>event.memberCheckIn && event.person===person.id && !event.done);
   if (!memberRole(person.role) || ![7,14,30].includes(person.cadence)) {
@@ -66,7 +114,10 @@ function memberPlan(person, date) {
 function finishMemberCheckIn(previous, current) {
   if (previous.done || !current.done || !current.memberCheckIn) return;
   const person=db().people.find(p=>p.id===current.person);
-  if (person?.cadence) memberPlan(person,addDays(dateKey(),person.cadence));
+  if (person?.cadence) {
+    person.lastContact=[person.lastContact||'',dateKey()].sort().at(-1);
+    memberPlan(person,memberSlot(addDays(dateKey(),person.cadence)));
+  }
 }
 
 const db = () => data[business];
@@ -154,7 +205,7 @@ function render() {
       const logs = [...(p.conversations || [])].sort((a,b)=>b.date.localeCompare(a.date));
       const checkIn = events.find(e=>e.person===p.id&&e.memberCheckIn&&!e.done);
       const summary = [p.role,memberRole(p.role)?cadenceLabel(p.cadence):p.stage||'New',p.direction,p.source,p.referral?'Referred by '+p.referral:''].filter(Boolean).join(' · ');
-      return '<section class="card"><h3>'+escape(p.name)+'</h3><div class="sub">'+escape(summary)+'</div>'+socialMarkup(p)+(p.email?'<p>'+escape(p.email)+'</p>':'')+'<p>'+escape(next?'Next: '+next.title+' · '+readable(next.date):'No next action scheduled')+(last?'<br>'+escape('Last completed: '+last.title+' · '+readable(last.date)):'')+(checkIn?'<br>'+escape('Member check-in: '+readable(checkIn.date)):'')+'</p>'+(p.notes?'<p>'+escape(p.notes)+'</p>':'')+'<div class="row-action">'+button('Log conversation','log',p.id,'primary')+button('Schedule','next',p.id)+button('Edit person','editPerson',p.id)+'</div>'+(logs.length?'<details><summary>Conversation history ('+logs.length+')</summary>'+logs.map(log=>'<div class="event"><div><strong>'+escape(readable(log.date)+' · '+log.channel)+'</strong><p>'+escape(log.notes)+'</p></div></div>').join('')+'</details>':'')+'</section>';
+      return '<section class="card"><h3>'+escape(p.name)+'</h3><div class="sub">'+escape(summary)+'</div>'+(memberRole(p.role)&&validContactDate(p.lastContact)?'<p>Last contact: '+escape(p.lastContact)+'</p>':'')+socialMarkup(p)+(p.email?'<p>'+escape(p.email)+'</p>':'')+'<p>'+escape(next?'Next: '+next.title+' · '+readable(next.date):'No next action scheduled')+(last?'<br>'+escape('Last completed: '+last.title+' · '+readable(last.date)):'')+(checkIn?'<br>'+escape('Member check-in: '+readable(checkIn.date)):'')+'</p>'+(p.notes?'<p>'+escape(p.notes)+'</p>':'')+'<div class="row-action">'+button('Log conversation','log',p.id,'primary')+button('Schedule','next',p.id)+button('Edit person','editPerson',p.id)+'</div>'+(logs.length?'<details><summary>Conversation history ('+logs.length+')</summary>'+logs.map(log=>'<div class="event"><div><strong>'+escape(readable(log.date)+' · '+log.channel)+'</strong><p>'+escape(log.notes)+'</p></div></div>').join('')+'</details>':'')+'</section>';
     }).join('')||'<p class="card">No matching people. Add a person or import a screenshot to start.</p>')+'</div>';
     return;
   }
@@ -269,7 +320,7 @@ function formPerson(record={}) {
     else db().people.push(person);
     if (memberRole(person.role)) { person.direction=''; person.source=''; }
     const pending = db().events.find(e=>e.person===person.id&&e.memberCheckIn&&!e.done);
-    if (person.cadence || pending) memberPlan(person,fields.firstDate || pending?.date || dateKey());
+    if (person.cadence || pending) memberPlan(person,fields.firstDate || pending?.date || memberSlot(dateKey()));
     close(); save('Person saved.');
   });
 }
@@ -280,6 +331,7 @@ function logConversation(person) {
     if(!notes)return;
     person.conversations ||= [];
     person.conversations.push({date:fields.date,channel:fields.channel,notes});
+    if(memberRole(person.role)&&validContactDate(fields.date)&&fields.date>(person.lastContact||'')) person.lastContact=fields.date;
     if(fields.stage) person.stage=fields.stage;
     if(fields.followDate) db().events.push({id:crypto.randomUUID(),person:person.id,title:fields.followTitle.trim()||'Follow up with '+person.name,type:'Follow-up',date:fields.followDate,time:'',status:'Planned',notes:'',done:false});
     close();
@@ -288,19 +340,15 @@ function logConversation(person) {
 }
 
 function scheduleMembers() {
-  const available = db().people.filter(person=>memberRole(person.role)&&!person.cadence).sort((a,b)=>a.name.localeCompare(b.name));
+  const available = db().people.filter(person=>memberRole(person.role)&&!db().events.some(event=>event.memberCheckIn&&event.person===person.id&&!event.done));
   if (!available.length) {
     modal('Member check-in schedule','<p>All saved members already have a schedule, or there are no members yet. Add members under People or import their names from a screenshot. Edit any member to set an individual schedule.</p>');
     return;
   }
-  modal('Member check-in schedule','<p>Start a recurring plan for '+available.length+' member'+(available.length===1?'':'s')+' without a schedule. Each completed check-in schedules the next one.</p><form><label>Frequency<select name="cadence">'+cadenceOptions.slice(1).map(([value,label])=>'<option value="'+value+'" '+(value==='14'?'selected':'')+'>'+label+'</option>').join('')+'</select></label><div class="form-grid"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>New check-ins per weekday<input name="batch" type="number" value="5" min="1" max="100" required></label></div><button class="primary">Schedule member check-ins</button></form>');
+  modal('Member check-in schedule','<p>Start a recurring plan for '+available.length+' member'+(available.length===1?'':'s')+' without a schedule. Each completed check-in schedules the next one.</p><form><label>Frequency<select name="cadence">'+cadenceOptions.slice(1).map(([value,label])=>'<option value="'+value+'" '+(value==='14'?'selected':'')+'>'+label+'</option>').join('')+'</select></label><div class="form-grid"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>Check-ins per week<input name="batch" type="number" value="'+weeklyCap()+'" min="5" max="10" required></label></div><button class="primary">Schedule member check-ins</button></form>');
   onSubmit(fields=>{
-    let scheduled=nextWeekday(fields.date);
-    available.forEach((person,index)=>{
-      if(index && index%Number(fields.batch)===0) scheduled=nextWeekday(addDays(scheduled,1));
-      person.cadence=Number(fields.cadence);
-      memberPlan(person,scheduled);
-    });
+    db().memberWeeklyCap=Number(fields.batch);
+    queueMembers(available,Number(fields.cadence),fields.date);
     day=nextWeekday(fields.date);
     tab='Calendar';
     close();
@@ -308,7 +356,7 @@ function scheduleMembers() {
   });
 }
 
-function screenshotContacts(blocks, text) {
+function screenshotContacts(blocks, text, member=false) {
   const emailPattern=/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi;
   const linkPattern=/https?:\/\/[^\s|]+|(?:www\.)?(?:facebook|instagram|tiktok|linkedin|threads|youtube)\.com\/[^\s|]+|(?<![\w.])@[\w.\-]+/gi;
   const words=(blocks||[]).flatMap(block=>block.paragraphs.flatMap(paragraph=>paragraph.lines.flatMap(line=>line.words)));
@@ -323,7 +371,7 @@ function screenshotContacts(blocks, text) {
   const cleanLink=value=>value.replace(/\?$/,'').replace(/[.,);]+$/,'');
   const lines=rows.map(row=>({...row,words:row.words.sort((a,b)=>a.bbox.x0-b.bbox.x0)}));
   const anchors=lines.flatMap(row=>{
-    const status=row.words.find(word=>/^(conversation|follow[-–]?up|new|booked|won|closed)$/i.test(word.text));
+    const status=row.words.find(word=>/^(conversation|follow[-–]?up|new|booked|won|closed|active|member|check[-–]?in|onboarding)$/i.test(word.text));
     if(!status)return [];
     const left=row.words.filter(word=>word.bbox.x1<status.bbox.x0);
     const name=left.map(word=>word.text).join(' ');
@@ -334,7 +382,8 @@ function screenshotContacts(blocks, text) {
       const group=lines.filter(row=>row.y>=contact.y-4&&row.y<(anchors[i+1]?.y??Infinity)-4);
       const notes=group.filter(row=>row.y>contact.y+4).map(row=>row.words.filter(word=>word.bbox.x0<contact.divider).map(word=>word.text).join(' ')).filter(Boolean).join(' ');
       const contents=group.map(row=>row.words.map(word=>word.text).join(' ')).join('\n');
-      return {name:contact.name,notes,social:(contents.replace(emailPattern,'').match(linkPattern)||[]).map(cleanLink).join(' | '),email:(contents.match(emailPattern)||[]).join(', ')};
+      const explicitDate=member?contents.match(/(?:last contact(?:ed)?|last spoke|last check[- ]?in)\s*[:–-]?\s*([^\n]+)/i)?.[1]:'';
+      return {name:contact.name,notes,...(explicitDate?{lastContact:lastContactFromNotes(explicitDate)}:{}),social:(contents.replace(emailPattern,'').match(linkPattern)||[]).map(cleanLink).join(' | '),email:(contents.match(emailPattern)||[]).join(', ')};
     });
   }
   const contacts=[];
@@ -348,25 +397,25 @@ function screenshotContacts(blocks, text) {
   return contacts;
 }
 
-function reviewContacts(contacts) {
-  $('contactReview').innerHTML=contacts.map(contact=>'<fieldset class="import-contact"><legend>Contact</legend><label>Name<input name="contactName" value="'+escape(contact.name)+'"></label><label>Notes<textarea name="contactNotes" rows="3">'+escape(contact.notes)+'</textarea></label><label>Social link or handle<input name="contactSocial" value="'+escape(contact.social)+'"></label><label>Email<input name="contactEmail" value="'+escape(contact.email)+'"></label><button type="button" class="remove-contact">Remove</button></fieldset>').join('');
+function reviewContacts(contacts, member) {
+  $('contactReview').innerHTML=contacts.map(contact=>'<fieldset class="import-contact"><legend>Contact</legend><label>Name<input name="contactName" value="'+escape(contact.name)+'"></label><label>Notes<textarea name="contactNotes" rows="3">'+escape(contact.notes)+'</textarea></label><label>Social link or handle<input name="contactSocial" value="'+escape(contact.social)+'"></label><label>Email<input name="contactEmail" value="'+escape(contact.email)+'"></label>'+(member?'<label>Last contact date<input type="date" name="contactLastContact" max="'+dateKey()+'" value="'+escape(contact.lastContact??lastContactFromNotes(contact.notes||''))+'"></label>':'')+'<button type="button" class="remove-contact">Remove</button></fieldset>').join('');
 }
 
 function importScreenshot() {
   const growth=tab==='Growth Partners';
   const roles=growth?current().roles.filter(memberRole):tab==='Leads'?current().roles.filter(leadRole):current().roles;
-  modal(growth?'Import member roster':'Import screenshot','<form><p>Choose a screenshot from Photos or Files. Review each contact’s name, notes, links and email before saving.</p><label>Screenshot<input type="file" id="image" accept="image/*"></label><button type="button" id="scan">Read screenshot</button><p id="scanStatus" role="status"></p><details><summary>See extracted text</summary><textarea id="raw" aria-label="Extracted text" readonly rows="5"></textarea></details><label>Contact import file (optional)<input type="file" id="contactFile" accept=".json,application/json"></label><div id="contactReview"></div><button type="button" id="addImportContact">Add contact to review</button><label>Relationship<select name="role" id="importRole">'+options(roles,growth?'Growth Partner member':'Prospect')+'</select></label><div class="form-grid" id="importLeadFields"><label>Direction<select name="direction">'+options(directions)+'</select></label><label>Source<select name="source">'+options(sources,'Own lead')+'</select></label></div><label>After import<select name="plan" id="importPlan"></select></label><div class="form-grid" id="importDates"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>People per weekday<input type="number" name="batch" value="5" min="1" max="100" required></label></div><button id="importSave" class="primary">Save contacts</button></form>');
+  modal(growth?'Import member roster':'Import screenshot','<form><p>Choose a screenshot from Photos or Files. Review each contact’s name, notes, links and email before saving.</p>'+(growth?'<p>Check the suggested last-contact dates. The oldest contacts go first, and the weekly limit also applies to recurring check-ins.</p>':'')+'<label>Screenshot<input type="file" id="image" accept="image/*"></label><button type="button" id="scan">Read screenshot</button><p id="scanStatus" role="status"></p><details><summary>See extracted text</summary><textarea id="raw" aria-label="Extracted text" readonly rows="5"></textarea></details><label>Contact import file (optional)<input type="file" id="contactFile" accept=".json,application/json"></label><div id="contactReview"></div><button type="button" id="addImportContact">Add contact to review</button><label>Relationship<select name="role" id="importRole">'+options(roles,growth?'Growth Partner member':'Prospect')+'</select></label><div class="form-grid" id="importLeadFields"><label>Direction<select name="direction">'+options(directions)+'</select></label><label>Source<select name="source">'+options(sources,'Own lead')+'</select></label></div><label>After import<select name="plan" id="importPlan"></select></label><div class="form-grid" id="importDates"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>'+(growth?'Check-ins per week':'People per weekday')+'<input type="number" name="batch" value="'+(growth?weeklyCap():5)+'" min="'+(growth?5:1)+'" max="'+(growth?10:100)+'" required></label></div><button id="importSave" class="primary">Save contacts</button></form>');
   const status=$('scanStatus'), scan=$('scan'), submit=$('importSave'), fileInput=$('image'), raw=$('raw');
   const role=$('importRole'), plan=$('importPlan');
   const review=$('contactReview');
-  const readReview=()=>[...review.querySelectorAll('fieldset')].map(row=>Object.fromEntries(['Name','Notes','Social','Email'].map(key=>[key.toLowerCase(),row.querySelector('[name=contact'+key+']').value.trim()])));
+  const readReview=()=>[...review.querySelectorAll('fieldset')].map(row=>Object.fromEntries(['Name','Notes','Social','Email',...(growth?['LastContact']:[])].map(key=>[key[0].toLowerCase()+key.slice(1),row.querySelector('[name=contact'+key+']').value.trim()])));
   review.onclick=event=>{if(event.target.matches('.remove-contact'))event.target.closest('fieldset').remove();};
-  $('addImportContact').onclick=()=>reviewContacts([...readReview(),{}]);
+  $('addImportContact').onclick=()=>reviewContacts([...readReview(),{}],growth);
   $('contactFile').onchange=async event=>{
     try{
       const contacts=JSON.parse(await event.target.files[0].text());
-      if(!Array.isArray(contacts)||!contacts.length||!contacts.every(contact=>contact&&typeof contact.name==='string'&&['notes','social','email'].every(key=>contact[key]===undefined||typeof contact[key]==='string')))throw Error('Invalid contacts');
-      reviewContacts([...readReview(),...contacts]);
+      if(!Array.isArray(contacts)||!contacts.length||!contacts.every(contact=>contact&&typeof contact.name==='string'&&['notes','social','email','lastContact'].every(key=>contact[key]===undefined||typeof contact[key]==='string')))throw Error('Invalid contacts');
+      reviewContacts([...readReview(),...contacts],growth);
       status.textContent='Review the contacts before saving.';
     }catch{status.textContent='Choose a contact import JSON file.';}
   };
@@ -375,7 +424,7 @@ function importScreenshot() {
     const member=memberRole(role.value);
     $('importLeadFields').hidden=member;
     plan.innerHTML='<option value="0">Save contacts only</option>'+(member?cadenceOptions.slice(1).map(([value,label])=>'<option value="'+value+'">'+label+' member check-ins</option>').join(''):'<option value="reach">Schedule first reach-outs</option>');
-    plan.value='0';
+    plan.value=growth?'14':'0';
     plan.onchange();
   };
   plan.onchange=()=>{$('importDates').hidden=plan.value==='0';};
@@ -398,8 +447,8 @@ function importScreenshot() {
       await worker.setParameters({tessedit_pageseg_mode:'6'});
       const result=await worker.recognize(file,{}, {text:true,blocks:true});
       raw.value=result.data.text;
-      const candidates=screenshotContacts(result.data.blocks,raw.value);
-      reviewContacts([...readReview(),...candidates]);
+      const candidates=screenshotContacts(result.data.blocks,raw.value,growth);
+      reviewContacts([...readReview(),...candidates],growth);
       status.textContent=candidates.length?'Review the fields under each name. Open extracted text for anything that needs correction.':'Open extracted text and add contacts manually.';
     } catch { status.textContent='The screenshot could not be read. Try a PNG or JPEG, or add a contact manually.'; }
     finally { if(worker) await worker.terminate().catch(()=>{});scan.disabled=false;submit.disabled=false; }
@@ -412,8 +461,9 @@ function importScreenshot() {
     }
     const isMember=memberRole(fields.role);
     const touched=new Set();
+    const memberQueue=[];
     let planned=nextWeekday(fields.date), scheduled=0;
-    for(const {name,links,notes,email} of rows) {
+    for(const {name,links,notes,email,lastContact} of rows) {
       const candidates=db().people.filter(p=>memberRole(p.role)===isMember&&p.name.toLowerCase()===name.toLowerCase());
       const sameProfile=candidates.find(p=>p.social?.split(/\s*\|\s*/).some(value=>links.some(link=>link.toLowerCase()===value.toLowerCase())));
       let person=sameProfile;
@@ -429,18 +479,25 @@ function importScreenshot() {
         if(!person.source) person.source=fields.source;
         if(!person.direction||person.direction==='Unclassified') person.direction=fields.direction;
       }
+      if(isMember&&validContactDate(lastContact)&&lastContact>(person.lastContact||'')) person.lastContact=lastContact;
       if(touched.has(person.id))continue;
       touched.add(person.id);
-      if(fields.plan==='0'||(isMember&&person.cadence))continue;
+      if(fields.plan==='0')continue;
+      if(growth){memberQueue.push(person);continue;}
+      if(isMember&&person.cadence)continue;
       if(fields.plan==='reach'&&db().events.some(e=>e.person===person.id&&!e.done&&e.type==='Reach-out'))continue;
       if(scheduled&&scheduled%Number(fields.batch)===0) planned=nextWeekday(addDays(planned,1));
       if(isMember){
         person.cadence=Number(fields.plan);
-        memberPlan(person,planned);
+        memberPlan(person,memberSlot(planned));
       }else{
         db().events.push({id:crypto.randomUUID(),title:'Reach out to '+person.name,person:person.id,type:'Reach-out',date:planned,time:'',status:'Planned',notes:'',done:false});
       }
       scheduled++;
+    }
+    if(growth&&fields.plan!=='0'){
+      db().memberWeeklyCap=Number(fields.batch);
+      scheduled=queueMembers(memberQueue,Number(fields.plan),fields.date);
     }
     day=nextWeekday(fields.date);
     tab=isMember?'Growth Partners':leadRole(fields.role)?'Leads':'People';
