@@ -377,10 +377,28 @@ function screenshotContacts(blocks, text, member=false) {
     const name=left.map(word=>word.text).join(' ');
     return nameLike.test(name)&&status.bbox.x0-left.at(-1).bbox.x1>15?[{...row,name,divider:status.bbox.x0}]:[];
   });
+  if(member && !anchors.length){
+    const leftEdge=Math.min(...words.map(word=>word.bbox.x0));
+    const titleName=/^\p{Lu}[\p{L}\p{M}.'’\-]*(?:\s+\p{Lu}[\p{L}\p{M}.'’\-]*){1,5}$/u;
+    const heading=/\b(growth partner|last contact|last spoke|last check|notes|email|profile|social|follow.up|member|name|facebook|send message|date)\b/i;
+    for(const row of lines){
+      const first=row.words[0];
+      if(first.bbox.x0>leftEdge+25)continue;
+      const columns=[[]];
+      for(const word of row.words){
+        const previous=columns.at(-1).at(-1);
+        if(previous&&word.bbox.x0-previous.bbox.x1>Math.max(25,(first.bbox.y1-first.bbox.y0)*1.7))columns.push([]);
+        columns.at(-1).push(word);
+      }
+      const label=columns[0].map(word=>word.text).join(' ');
+      const name=label.replace(/^name\s*:\s*/i,'').trim();
+      if(titleName.test(name)&&!heading.test(name))anchors.push({...row,name,divider:columns.length>1?columns[1][0].bbox.x0:Infinity});
+    }
+  }
   if(anchors.length){
     return anchors.map((contact,i)=>{
       const group=lines.filter(row=>row.y>=contact.y-4&&row.y<(anchors[i+1]?.y??Infinity)-4);
-      const notes=group.filter(row=>row.y>contact.y+4).map(row=>row.words.filter(word=>word.bbox.x0<contact.divider).map(word=>word.text).join(' ')).filter(Boolean).join(' ');
+      const notes=group.filter(row=>row.y>contact.y+4).map(row=>row.words.filter(word=>word.bbox.x0<contact.divider).map(word=>word.text).join(' ').replace(emailPattern,'').replace(linkPattern,'').trim()).filter(Boolean).join(' ');
       const contents=group.map(row=>row.words.map(word=>word.text).join(' ')).join('\n');
       const explicitDate=member?contents.match(/(?:last contact(?:ed)?|last spoke|last check[- ]?in)\s*[:–-]?\s*([^\n]+)/i)?.[1]:'';
       return {name:contact.name,notes,...(explicitDate?{lastContact:lastContactFromNotes(explicitDate)}:{}),social:(contents.replace(emailPattern,'').match(linkPattern)||[]).map(cleanLink).join(' | '),email:(contents.match(emailPattern)||[]).join(', ')};
@@ -449,7 +467,7 @@ function importScreenshot() {
       raw.value=result.data.text;
       const candidates=screenshotContacts(result.data.blocks,raw.value,growth);
       reviewContacts([...readReview(),...candidates],growth);
-      status.textContent=candidates.length?'Review the fields under each name. Open extracted text for anything that needs correction.':'Open extracted text and add contacts manually.';
+      status.textContent=candidates.length?'Review the fields under each name before saving.':'No contact names were identified in this image. Try a closer crop with the names and their notes visible.';
     } catch { status.textContent='The screenshot could not be read. Try a PNG or JPEG, or add a contact manually.'; }
     finally { if(worker) await worker.terminate().catch(()=>{});scan.disabled=false;submit.disabled=false; }
   };
