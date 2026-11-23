@@ -147,14 +147,14 @@ function render() {
     const metrics = leads?renderLeadMetrics(tracked):'';
     const filters = leads?'<select id="directionFilter" aria-label="Lead direction"><option value="">All directions</option>'+options(directions,directionFilter)+'</select><select id="sourceFilter" aria-label="Lead source"><option value="">All sources</option>'+options(sources,sourceFilter)+'</select>':'';
 
-    const visible = (leads?tracked:people).filter(p=>(tab!=='People'||!roleFilter||p.role===roleFilter)&&(growth||!stageFilter||(p.stage||'New')===stageFilter)&&[p.name,p.referral,p.notes,p.social].join(' ').toLowerCase().includes(query.toLowerCase()));
+    const visible = (leads?tracked:people).filter(p=>(tab!=='People'||!roleFilter||p.role===roleFilter)&&(growth||!stageFilter||(p.stage||'New')===stageFilter)&&[p.name,p.referral,p.notes,p.social,p.email].join(' ').toLowerCase().includes(query.toLowerCase()));
     $('view').innerHTML = headings+'<div class="controls">'+buttons+'</div><div class="controls"><input id="search" type="search" aria-label="Search people" placeholder="Find a name, handle or setter" value="'+escape(query)+'">'+(tab==='People'?'<select id="roleFilter" aria-label="Filter relationship"><option value="">All relationships</option>'+options(current().roles,roleFilter)+'</select>':'')+(growth?'':'<select id="stageFilter" aria-label="Filter lead stage"><option value="">All lead stages</option>'+options(stages,stageFilter)+'</select>')+filters+'</div>'+metrics+'<div id="peopleList">'+(visible.map(p=>{
       const next = events.find(e=>e.person===p.id&&!e.done);
       const last = events.filter(e=>e.person===p.id&&e.done).at(-1);
       const logs = [...(p.conversations || [])].sort((a,b)=>b.date.localeCompare(a.date));
       const checkIn = events.find(e=>e.person===p.id&&e.memberCheckIn&&!e.done);
       const summary = [p.role,memberRole(p.role)?cadenceLabel(p.cadence):p.stage||'New',p.direction,p.source,p.referral?'Referred by '+p.referral:''].filter(Boolean).join(' · ');
-      return '<section class="card"><h3>'+escape(p.name)+'</h3><div class="sub">'+escape(summary)+'</div>'+socialMarkup(p)+'<p>'+escape(next?'Next: '+next.title+' · '+readable(next.date):'No next action scheduled')+(last?'<br>'+escape('Last completed: '+last.title+' · '+readable(last.date)):'')+(checkIn?'<br>'+escape('Member check-in: '+readable(checkIn.date)):'')+'</p>'+(p.notes?'<p>'+escape(p.notes)+'</p>':'')+'<div class="row-action">'+button('Log conversation','log',p.id,'primary')+button('Schedule','next',p.id)+button('Edit person','editPerson',p.id)+'</div>'+(logs.length?'<details><summary>Conversation history ('+logs.length+')</summary>'+logs.map(log=>'<div class="event"><div><strong>'+escape(readable(log.date)+' · '+log.channel)+'</strong><p>'+escape(log.notes)+'</p></div></div>').join('')+'</details>':'')+'</section>';
+      return '<section class="card"><h3>'+escape(p.name)+'</h3><div class="sub">'+escape(summary)+'</div>'+socialMarkup(p)+(p.email?'<p>'+escape(p.email)+'</p>':'')+'<p>'+escape(next?'Next: '+next.title+' · '+readable(next.date):'No next action scheduled')+(last?'<br>'+escape('Last completed: '+last.title+' · '+readable(last.date)):'')+(checkIn?'<br>'+escape('Member check-in: '+readable(checkIn.date)):'')+'</p>'+(p.notes?'<p>'+escape(p.notes)+'</p>':'')+'<div class="row-action">'+button('Log conversation','log',p.id,'primary')+button('Schedule','next',p.id)+button('Edit person','editPerson',p.id)+'</div>'+(logs.length?'<details><summary>Conversation history ('+logs.length+')</summary>'+logs.map(log=>'<div class="event"><div><strong>'+escape(readable(log.date)+' · '+log.channel)+'</strong><p>'+escape(log.notes)+'</p></div></div>').join('')+'</details>':'')+'</section>';
     }).join('')||'<p class="card">No matching people. Add a person or import a screenshot to start.</p>')+'</div>';
     return;
   }
@@ -251,7 +251,7 @@ function formEvent(record = {}, suggested = dateKey()) {
 function formPerson(record={}) {
   const pending = db().events.find(e=>e.person===record.id&&e.memberCheckIn&&!e.done);
   const memberFields = business==='LWA'?'<div class="form-grid" id="memberFields"><label>Check-in frequency<select name="cadence" id="personCadence">'+cadenceOptions.map(([value,label])=>'<option value="'+value+'" '+(Number(value)===Number(record.cadence||0)?'selected':'')+'>'+label+'</option>').join('')+'</select></label><label>Next or first check-in<input type="date" name="firstDate" value="'+(pending?.date||'')+'"></label></div>':'';
-  modal(record.id?'Edit person':'Add a person','<form><label>Name<input name="name" required maxlength="100" value="'+escape(record.name)+'"></label><label>Relationship<select name="role" id="personRole">'+options(current().roles,record.role||'Prospect')+'</select></label><label id="leadStage">Lead stage<select name="stage">'+options(stages,record.stage)+'</select></label>'+memberFields+'<div class="form-grid" id="leadFields"><label>Direction<select name="direction">'+options(directions,record.direction)+'</select></label><label>Source<select name="source"><option value="">Choose source</option>'+options(sources,record.source)+'</select></label></div><label>Social URLs or handles<input name="social" value="'+escape(record.social)+'" placeholder="@handle or profile URL (use | between entries)"></label><label>Referred by / setter<input name="referral" maxlength="100" value="'+escape(record.referral)+'"></label><label>Notes<textarea name="notes" rows="4">'+escape(record.notes)+'</textarea></label><button class="primary">Save person</button></form>');
+  modal(record.id?'Edit person':'Add a person','<form><label>Name<input name="name" required maxlength="100" value="'+escape(record.name)+'"></label><label>Relationship<select name="role" id="personRole">'+options(current().roles,record.role||'Prospect')+'</select></label><label id="leadStage">Lead stage<select name="stage">'+options(stages,record.stage)+'</select></label>'+memberFields+'<div class="form-grid" id="leadFields"><label>Direction<select name="direction">'+options(directions,record.direction)+'</select></label><label>Source<select name="source"><option value="">Choose source</option>'+options(sources,record.source)+'</select></label></div><label>Social URLs or handles<input name="social" value="'+escape(record.social)+'" placeholder="@handle or profile URL (use | between entries)"></label><label>Email<input name="email" value="'+escape(record.email)+'"></label><label>Referred by / setter<input name="referral" maxlength="100" value="'+escape(record.referral)+'"></label><label>Notes<textarea name="notes" rows="4">'+escape(record.notes)+'</textarea></label><button class="primary">Save person</button></form>');
   const role = $('personRole');
   function updatePersonFields() {
     const member = memberRole(role.value);
@@ -308,39 +308,74 @@ function scheduleMembers() {
   });
 }
 
-function suggestContacts(text) {
-  const common = /\b(message|follow|joined|member|active|today|yesterday|admin|invite|search|profile|facebook|reply|group|share|notifications|following|ago|seen|people|pending|accepted|remove|add|block|view|manage|chat|appointment|sales|support|sent)\b/i;
-  const contactPattern = /https?:\/\/[^\s|]+|(?:(?:www|m|vm|vt)\.)?(?:facebook|instagram|tiktok|linkedin|threads|youtube)\.com\/[^\s|]+|(?<![\w.])@[\w.]+/gi;
+function screenshotContacts(blocks, text) {
+  const emailPattern=/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi;
+  const linkPattern=/https?:\/\/[^\s|]+|(?:www\.)?(?:facebook|instagram|tiktok|linkedin|threads|youtube)\.com\/[^\s|]+|(?<![\w.])@[\w.\-]+/gi;
+  const words=(blocks||[]).flatMap(block=>block.paragraphs.flatMap(paragraph=>paragraph.lines.flatMap(line=>line.words)));
   const rows=[];
-  let adjacent=null;
-  for (const line of text.split('\n')) {
-    const socials=[...new Set((line.match(contactPattern)||[]).map(value=>value.replace(/[.,);]+$/,'')))];
-    const name=line.replace(contactPattern,'').replace(/^[•|\-\s]+|[|:\-\s]+$/g,'').trim();
-    if (!common.test(name)&&/^[\p{Lu}][\p{L}\p{M}.'’\-]*(?:\s+[\p{Lu}][\p{L}\p{M}.'’\-]*){1,4}$/u.test(name)) {
-      adjacent={name,socials};
-      rows.push(adjacent);
-    } else if (socials.length && adjacent && !name) {
-      adjacent.socials.push(...socials);
-    } else if (socials.length) {
-      rows.push({name:'',socials});
-      adjacent=null;
-    } else if(name) {
-      adjacent=null;
-    }
+  for(const word of words.sort((a,b)=>a.bbox.y0-b.bbox.y0)){
+    const y=(word.bbox.y0+word.bbox.y1)/2;
+    const row=rows.find(row=>Math.abs(row.y-y)<Math.max(5,(word.bbox.y1-word.bbox.y0)*.48));
+    if(row) row.words.push(word);
+    else rows.push({y,words:[word]});
   }
-  return rows.map(row=>[row.name,...new Set(row.socials)].join(' | ')).join('\n');
+  const nameLike=/^[\p{L}\p{M}.'’\-]+(?:\s+[\p{L}\p{M}.'’\-]+){1,5}$/u;
+  const cleanLink=value=>value.replace(/\?$/,'').replace(/[.,);]+$/,'');
+  const lines=rows.map(row=>({...row,words:row.words.sort((a,b)=>a.bbox.x0-b.bbox.x0)}));
+  const anchors=lines.flatMap(row=>{
+    const status=row.words.find(word=>/^(conversation|follow[-–]?up|new|booked|won|closed)$/i.test(word.text));
+    if(!status)return [];
+    const left=row.words.filter(word=>word.bbox.x1<status.bbox.x0);
+    const name=left.map(word=>word.text).join(' ');
+    return nameLike.test(name)&&status.bbox.x0-left.at(-1).bbox.x1>15?[{...row,name,divider:status.bbox.x0}]:[];
+  });
+  if(anchors.length){
+    return anchors.map((contact,i)=>{
+      const group=lines.filter(row=>row.y>=contact.y-4&&row.y<(anchors[i+1]?.y??Infinity)-4);
+      const notes=group.filter(row=>row.y>contact.y+4).map(row=>row.words.filter(word=>word.bbox.x0<contact.divider).map(word=>word.text).join(' ')).filter(Boolean).join(' ');
+      const contents=group.map(row=>row.words.map(word=>word.text).join(' ')).join('\n');
+      return {name:contact.name,notes,social:(contents.replace(emailPattern,'').match(linkPattern)||[]).map(cleanLink).join(' | '),email:(contents.match(emailPattern)||[]).join(', ')};
+    });
+  }
+  const contacts=[];
+  for(const line of text.split('\n')){
+    const email=(line.match(emailPattern)||[]).join(', ');
+    const cleaned=line.replace(emailPattern,'');
+    const social=(cleaned.match(linkPattern)||[]).map(cleanLink).join(' | ');
+    const name=cleaned.replace(linkPattern,'').replace(/^[•|\s]+|[|:\s]+$/g,'');
+    if(nameLike.test(name)&&!/\b(message|notes|email|profile|search|request|reply|send|just|conversation|member|people|follow|invite)\b/i.test(name)) contacts.push({name,notes:'',social,email});
+  }
+  return contacts;
 }
+
+function reviewContacts(contacts) {
+  $('contactReview').innerHTML=contacts.map(contact=>'<fieldset class="import-contact"><legend>Contact</legend><label>Name<input name="contactName" value="'+escape(contact.name)+'"></label><label>Notes<textarea name="contactNotes" rows="3">'+escape(contact.notes)+'</textarea></label><label>Social link or handle<input name="contactSocial" value="'+escape(contact.social)+'"></label><label>Email<input name="contactEmail" value="'+escape(contact.email)+'"></label><button type="button" class="remove-contact">Remove</button></fieldset>').join('');
+}
+
 function importScreenshot() {
   const growth=tab==='Growth Partners';
   const roles=growth?current().roles.filter(memberRole):tab==='Leads'?current().roles.filter(leadRole):current().roles;
-  modal(growth?'Import member roster':'Import screenshot','<form><p>Choose a screenshot from Photos or Files. Review the names and any visible profile links or @handles before saving.</p><label>Screenshot<input type="file" id="image" accept="image/*"></label><button type="button" id="scan">Read screenshot</button><p id="scanStatus" role="status"></p><details><summary>See extracted text</summary><textarea id="raw" aria-label="Extracted text" readonly rows="5"></textarea></details><label>One person per line<textarea name="names" id="names" rows="6" required placeholder="Name | @handle | profile URL"></textarea></label><label>Relationship<select name="role" id="importRole">'+options(roles,growth?'Growth Partner member':'Prospect')+'</select></label><div class="form-grid" id="importLeadFields"><label>Direction<select name="direction">'+options(directions)+'</select></label><label>Source<select name="source">'+options(sources,'Own lead')+'</select></label></div><label>After import<select name="plan" id="importPlan"></select></label><div class="form-grid" id="importDates"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>People per weekday<input type="number" name="batch" value="5" min="1" max="100" required></label></div><button id="importSave" class="primary">Save contacts</button></form>');
-  const status=$('scanStatus'), scan=$('scan'), submit=$('importSave'), fileInput=$('image'), names=$('names'), raw=$('raw');
+  modal(growth?'Import member roster':'Import screenshot','<form><p>Choose a screenshot from Photos or Files. Review each contact’s name, notes, links and email before saving.</p><label>Screenshot<input type="file" id="image" accept="image/*"></label><button type="button" id="scan">Read screenshot</button><p id="scanStatus" role="status"></p><details><summary>See extracted text</summary><textarea id="raw" aria-label="Extracted text" readonly rows="5"></textarea></details><label>Contact import file (optional)<input type="file" id="contactFile" accept=".json,application/json"></label><div id="contactReview"></div><button type="button" id="addImportContact">Add contact to review</button><label>Relationship<select name="role" id="importRole">'+options(roles,growth?'Growth Partner member':'Prospect')+'</select></label><div class="form-grid" id="importLeadFields"><label>Direction<select name="direction">'+options(directions)+'</select></label><label>Source<select name="source">'+options(sources,'Own lead')+'</select></label></div><label>After import<select name="plan" id="importPlan"></select></label><div class="form-grid" id="importDates"><label>Start date<input type="date" name="date" required value="'+dateKey()+'"></label><label>People per weekday<input type="number" name="batch" value="5" min="1" max="100" required></label></div><button id="importSave" class="primary">Save contacts</button></form>');
+  const status=$('scanStatus'), scan=$('scan'), submit=$('importSave'), fileInput=$('image'), raw=$('raw');
   const role=$('importRole'), plan=$('importPlan');
+  const review=$('contactReview');
+  const readReview=()=>[...review.querySelectorAll('fieldset')].map(row=>Object.fromEntries(['Name','Notes','Social','Email'].map(key=>[key.toLowerCase(),row.querySelector('[name=contact'+key+']').value.trim()])));
+  review.onclick=event=>{if(event.target.matches('.remove-contact'))event.target.closest('fieldset').remove();};
+  $('addImportContact').onclick=()=>reviewContacts([...readReview(),{}]);
+  $('contactFile').onchange=async event=>{
+    try{
+      const contacts=JSON.parse(await event.target.files[0].text());
+      if(!Array.isArray(contacts)||!contacts.length||!contacts.every(contact=>contact&&typeof contact.name==='string'&&['notes','social','email'].every(key=>contact[key]===undefined||typeof contact[key]==='string')))throw Error('Invalid contacts');
+      reviewContacts([...readReview(),...contacts]);
+      status.textContent='Review the contacts before saving.';
+    }catch{status.textContent='Choose a contact import JSON file.';}
+  };
+
   role.onchange=()=>{
     const member=memberRole(role.value);
     $('importLeadFields').hidden=member;
     plan.innerHTML='<option value="0">Save contacts only</option>'+(member?cadenceOptions.slice(1).map(([value,label])=>'<option value="'+value+'">'+label+' member check-ins</option>').join(''):'<option value="reach">Schedule first reach-outs</option>');
-    plan.value=member?'14':'0';
+    plan.value='0';
     plan.onchange();
   };
   plan.onchange=()=>{$('importDates').hidden=plan.value==='0';};
@@ -360,19 +395,17 @@ function importScreenshot() {
         langPath:assets.href.replace(/\/$/,''),
         logger:message=>{if(message.status==='recognizing text') status.textContent='Reading screenshot… '+Math.round(message.progress*100)+'%';}
       });
-      const result=await worker.recognize(file);
+      await worker.setParameters({tessedit_pageseg_mode:'6'});
+      const result=await worker.recognize(file,{}, {text:true,blocks:true});
       raw.value=result.data.text;
-      const candidates=suggestContacts(raw.value);
-      if(candidates) names.value=[names.value.trim(),candidates].filter(Boolean).join('\n');
-      status.textContent=candidates?'Review the suggested names and social details. Add any missing names and remove extra text.':'Review the extracted text and copy the names you want into the list.';
-    } catch { status.textContent='The screenshot could not be read. Try a PNG or JPEG, or paste the names below.'; }
+      const candidates=screenshotContacts(result.data.blocks,raw.value);
+      reviewContacts([...readReview(),...candidates]);
+      status.textContent=candidates.length?'Review the fields under each name. Open extracted text for anything that needs correction.':'Open extracted text and add contacts manually.';
+    } catch { status.textContent='The screenshot could not be read. Try a PNG or JPEG, or add a contact manually.'; }
     finally { if(worker) await worker.terminate().catch(()=>{});scan.disabled=false;submit.disabled=false; }
   };
   onSubmit(fields=>{
-    const rows=fields.names.split('\n').filter(line=>line.trim()).map(line=>{
-      const [name,...links]=line.split('|').map(value=>value.trim());
-      return {name:name.replace(/\s+/g,' '),links:links.filter(Boolean)};
-    });
+    const rows=readReview().map(contact=>({...contact,links:contact.social.split(/\s*\|\s*/).filter(Boolean)}));
     if(!rows.length||rows.some(row=>!row.name)){
       status.textContent='Add a name at the start of each line or remove that line.';
       return;
@@ -380,15 +413,17 @@ function importScreenshot() {
     const isMember=memberRole(fields.role);
     const touched=new Set();
     let planned=nextWeekday(fields.date), scheduled=0;
-    for(const {name,links} of rows) {
+    for(const {name,links,notes,email} of rows) {
       const candidates=db().people.filter(p=>memberRole(p.role)===isMember&&p.name.toLowerCase()===name.toLowerCase());
       const sameProfile=candidates.find(p=>p.social?.split(/\s*\|\s*/).some(value=>links.some(link=>link.toLowerCase()===value.toLowerCase())));
       let person=sameProfile;
-      if(!person&&candidates.length===1&&(!links.length||!candidates[0].social)) person=candidates[0];
+      if(!person&&candidates.length===1&&(!links.length||!candidates[0].social||candidates[0].social.split(' | ').some(old=>links.some(link=>old.split('?')[0]===link.split('?')[0])))) person=candidates[0];
       if(!person){
         person={id:crypto.randomUUID(),name,role:fields.role,referral:'',notes:'',stage:'New',source:isMember?'':fields.source,direction:isMember?'':fields.direction};
         db().people.push(person);
       }
+      if(notes && !(person.notes||'').includes(notes)) person.notes=[person.notes,notes].filter(Boolean).join('\n\n');
+      if(email && !(person.email||'').includes(email)) person.email=[person.email,email].filter(Boolean).join(', ');
       if(links.length) person.social=[...new Set([...(person.social||'').split(/\s*\|\s*/).filter(Boolean),...links])].join(' | ');
       if(!isMember) {
         if(!person.source) person.source=fields.source;
